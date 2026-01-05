@@ -7,6 +7,7 @@ const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('../swagger');
 
 const config = require('./config');
+const { ApiError } = require('./utils/apiError');
 const { requestLogger } = require('./middleware/logger');
 const { errorHandler } = require('./middleware/errorHandler');
 
@@ -42,7 +43,8 @@ const corsHandler = cors({
       return callback(null, true);
     }
 
-    return callback(new Error('Not allowed by CORS'));
+    // Return a 403 ApiError so the error handler sends JSON
+    return callback(new ApiError(403, 'Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],

@@ -9,7 +9,7 @@ const config = require('../config');
 const MAX_TEXT_CHARS = 60_000;
 
 // Safe fallback model if the configured model is not available for the current API key/project.
-const FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
+const FALLBACK_GEMINI_MODEL = 'gemini-2.0-flash';
 
 /**
  * Build a prompt that strongly encourages strict JSON output.
