@@ -8,8 +8,9 @@ const config = require('../config');
 // A conservative max for text sent to LLM to prevent huge requests.
 const MAX_TEXT_CHARS = 60_000;
 
-// Safe fallback model if the configured model is not available for the current API key/project.
-const FALLBACK_GEMINI_MODEL = 'gemini-2.0-flash';
+// Safe fallback model if the configured model is not available.
+// We swap logic: Default is 2.0-flash (via config), fallback is 2.5-flash (or older stable).
+const FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
 
 /**
  * Build a prompt that strongly encourages strict JSON output.
@@ -39,7 +40,6 @@ function buildPrompt(text, jobRole) {
 
 /**
  * Detect whether an upstream Gemini error is likely caused by an unsupported/unavailable model.
- * We keep this intentionally heuristic because different environments/versions shape errors differently.
  * @param {any} err
  * @returns {boolean}
  */
@@ -48,9 +48,6 @@ function isUnsupportedModelError(err) {
   const message = String((err && err.message) || '');
   const bodyText = String((err && err.response && err.response.data) || '');
 
-  // Common signals:
-  // - 404 / NOT_FOUND (model doesn't exist or not enabled)
-  // - message mentions model not found / unsupported / not available
   if (status === 404 || status === 'NOT_FOUND') return true;
 
   const haystack = `${message}\n${bodyText}`.toLowerCase();
@@ -75,8 +72,7 @@ async function generateWithModel(genAI, modelName, prompt) {
   const model = genAI.getGenerativeModel({
     model: modelName,
     generationConfig: {
-      // Encourage deterministic structured output.
-      temperature: 0.2,
+      temperature: 0.2, // Deterministic structured output
     },
   });
 
@@ -87,7 +83,7 @@ async function generateWithModel(genAI, modelName, prompt) {
 /**
  * PUBLIC_INTERFACE
  * Analyze resume text using Google Gemini and return strict JSON matching our schema.
- * @param {{ text: string, jobRole: string }} params
+ * @param {{ text: string, jobRole: string, requestId?: string }} params
  * @returns {Promise<object>}
  */
 async function analyzeResumeWithGemini(params) {
@@ -133,7 +129,6 @@ async function analyzeResumeWithGemini(params) {
     const errorDetails = {
       status: err.status || err.statusCode,
       message: err.message,
-      responseBody: err.response && err.response.data
     };
 
     // eslint-disable-next-line no-console
@@ -145,8 +140,9 @@ async function analyzeResumeWithGemini(params) {
       error: errorDetails
     }));
 
-    // If the configured model is unavailable, retry once with a safe default.
-    if (isUnsupportedModelError(err) && primaryModelName !== fallbackModelName) {
+    // If primary failed with model-related error, try fallback.
+    // Also try fallback if it's a generic 500/503 from Google, as sometimes specific models have outages.
+    if (primaryModelName !== fallbackModelName) {
       try {
         // eslint-disable-next-line no-console
         console.log(JSON.stringify({
@@ -157,40 +153,49 @@ async function analyzeResumeWithGemini(params) {
         }));
 
         rawText = await generateWithModel(genAI, fallbackModelName, prompt);
+        
+        // Log success on fallback
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify({
+          level: 'info',
+          msg: 'Fallback model succeeded',
+          requestId,
+          model: fallbackModelName
+        }));
+
       } catch (fallbackErr) {
         // eslint-disable-next-line no-console
         console.error(JSON.stringify({
           level: 'error',
-          msg: 'Gemini fallback model failed',
+          msg: 'Gemini fallback model also failed',
           requestId,
           model: fallbackModelName,
           error: {
             status: fallbackErr.status || fallbackErr.statusCode,
-            message: fallbackErr.message,
-            responseBody: fallbackErr.response && fallbackErr.response.data
+            message: fallbackErr.message
           }
         }));
 
-        throw new ApiError(502, 'Gemini request failed for both primary and fallback models.', {
+        // Return a safe 502 error structure
+        throw new ApiError(502, 'Resume analysis unavailable. Both primary and fallback models failed.', {
+          requestId,
           primaryModel: primaryModelName,
           fallbackModel: fallbackModelName,
-          primaryError: err && err.message ? err.message : String(err),
-          fallbackError: fallbackErr && fallbackErr.message ? fallbackErr.message : String(fallbackErr),
-          hint: 'Verify model availability for your API key/project. Consider listing available models via the Gemini "ListModels" API and update GEMINI_MODEL.',
+          reason: 'Upstream AI service error'
         });
       }
     } else {
-      // Not a model-availability issue (or fallback not applicable): fail fast.
-      throw new ApiError(502, 'Gemini request failed.', {
+      // No fallback possible
+      throw new ApiError(502, 'Resume analysis failed.', {
+        requestId,
         model: primaryModelName,
-        reason: err && err.message ? err.message : String(err),
+        reason: err.message || 'Upstream error'
       });
     }
   }
 
   const parsed = safeJsonParse(rawText);
   if (!parsed) {
-    // We must guard against malformed responses (acceptance requirement).
     // eslint-disable-next-line no-console
     console.error(JSON.stringify({
       level: 'error',
@@ -199,10 +204,9 @@ async function analyzeResumeWithGemini(params) {
       snippet: rawText.slice(0, 200)
     }));
 
-    throw new ApiError(502, 'Gemini returned an invalid JSON response.', {
-      model: primaryModelName,
-      example: 'Ensure model output is JSON only',
-      receivedSnippet: rawText.slice(0, 500),
+    throw new ApiError(502, 'AI returned an invalid response format.', {
+      requestId,
+      model: primaryModelName
     });
   }
 

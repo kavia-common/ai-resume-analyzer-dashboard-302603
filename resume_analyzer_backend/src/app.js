@@ -65,6 +65,15 @@ app.get('/_debug/cors', (req, res) => {
   });
 });
 
+// Model debug endpoint (Self-test)
+app.get('/_debug/model', (req, res) => {
+  return res.status(200).json({
+    status: 'ok',
+    model: config.GEMINI_MODEL,
+    message: 'Active Gemini model configuration'
+  });
+});
+
 // Manual OPTIONS handlers to ensure preflight succeeds
 app.options('/analyze', (req, res) => {
   const origin = req.headers.origin || '*';

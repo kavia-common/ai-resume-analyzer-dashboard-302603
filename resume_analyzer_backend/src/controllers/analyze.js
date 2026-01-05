@@ -40,10 +40,38 @@ class AnalyzeController {
       throw new ApiError(413, 'Field "jobRole" is too long.', { maxChars: MAX_JOBROLE_CHARS });
     }
 
-    const analysis = await analyzeResumeWithGemini({ text, jobRole, requestId });
+    try {
+      const analysis = await analyzeResumeWithGemini({ text, jobRole, requestId });
+      
+      // Log success
+      // eslint-disable-next-line no-console
+      console.log(JSON.stringify({
+        level: 'info',
+        msg: 'Analyze request completed successfully',
+        requestId,
+        timestamp: new Date().toISOString()
+      }));
 
-    // Must return strict JSON matching schema.
-    return res.status(200).json(analysis);
+      // Must return strict JSON matching schema.
+      return res.status(200).json(analysis);
+    } catch (error) {
+      // Ensure we catch everything here so we can control the output
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      
+      // Wrap unknown errors
+      // eslint-disable-next-line no-console
+      console.error(JSON.stringify({
+        level: 'error',
+        msg: 'Unexpected error in analyze controller',
+        requestId,
+        error: error.message,
+        stack: error.stack
+      }));
+
+      throw new ApiError(500, 'An unexpected error occurred during analysis.', { requestId });
+    }
   }
 }
 

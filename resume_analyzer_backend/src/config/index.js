@@ -11,7 +11,7 @@ const DEFAULT_CORS_ORIGIN = 'http://localhost:3000';
 const DEFAULT_MAX_UPLOAD_MB = 10;
 
 // Gemini model default (configurable via env)
-const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
 
 const PORT = Number(process.env.PORT || DEFAULT_PORT);
 
