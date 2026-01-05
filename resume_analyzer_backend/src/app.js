@@ -65,11 +65,32 @@ if (config.CORS_ALLOW_ALL) {
   });
 }
 
+// DEBUG: Lightweight request logging for OPTIONS /analyze and /upload
+// Logs method, path, and Origin to help diagnose CORS preflight issues.
+app.options(['/analyze', '/upload'], (req, res, next) => {
+  // eslint-disable-next-line no-console
+  console.log(`[CORS-DEBUG] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'null'}`);
+  next();
+}, corsHandler);
+
 // Explicitly answer preflight for every route FIRST (prevents fallthrough/missing headers).
 app.options('*', corsHandler);
 
 // Apply CORS BEFORE routes so it can handle preflight properly.
 app.use(corsHandler);
+
+// DEBUG: Temporary diagnostics endpoint for CORS
+// Returns detected Origin and active configuration.
+app.get('/_debug/cors', (req, res) => {
+  res.json({
+    detectedOrigin: req.headers.origin || null,
+    corsAllowAll: config.CORS_ALLOW_ALL,
+    corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    timestamp: new Date().toISOString(),
+  });
+});
 
 // Basic request logging (method, URL, status, response time)
 app.use(requestLogger);
