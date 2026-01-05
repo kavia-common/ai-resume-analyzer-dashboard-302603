@@ -21,9 +21,7 @@ const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
   : [
       DEFAULT_CORS_ORIGIN,
-      // Backend preview domain (existing)
-      'https://vscode-internal-36100-beta.beta01.cloud.kavia.ai:3000',
-      // Frontend origin that must be allowed for CORS (requested)
+      // Frontend origin (active environment)
       'https://vscode-internal-21009-beta.beta01.cloud.kavia.ai:3000',
     ];
 

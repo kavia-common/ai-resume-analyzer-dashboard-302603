@@ -51,8 +51,8 @@ app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
 // Diagnostics endpoint
 app.get('/_debug/cors', (req, res) => {
   const origin = req.headers.origin || null;
-  const allowAllEnv = !!process.env.CORS_ALLOW_ALL && process.env.CORS_ALLOW_ALL.toString().toLowerCase() === 'true';
-  const allowList = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+  const allowAllEnv = config.CORS_ALLOW_ALL;
+  const allowList = config.CORS_ALLOWED_ORIGINS;
   
   res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
