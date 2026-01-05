@@ -1,4 +1,5 @@
-'use strict';
+eniorr softwarre 'use strict';
+require('express-async-errors');
 
 const cors = require('cors');
 const express = require('express');
@@ -17,104 +18,100 @@ const app = express();
 // Trust proxy (useful when deployed behind a reverse proxy)
 app.set('trust proxy', true);
 
-// ----------------------------------------------------------------------
-// 1) CORS SETUP & CONFIGURATION
-// ----------------------------------------------------------------------
+/**
+ * CORS: Dynamic origin allow-list supporting multiple origins.
+ *
+ * Requirements:
+ * - OPTIONS preflight for /analyze (and ALL routes) must return 204
+ * - Include allowed methods: GET,POST,OPTIONS
+ * - Include allowed headers: Content-Type
+ * - Use dynamic allow-list from CORS_ALLOWED_ORIGINS
+ *
+ * NOTE: If an Origin is not allow-listed, preflight will be rejected (no CORS headers).
+ *
+ * IMPORTANT ORDERING:
+ * - Register app.options('*', ...) BEFORE any other middleware/routes so preflight never falls through
+ *   to other handlers (which can result in missing CORS headers).
+ */
+let corsHandler;
 
-const allowAll = config.CORS_ALLOW_ALL;
-const allowedOrigins = config.CORS_ALLOWED_ORIGINS;
+if (config.CORS_ALLOW_ALL) {
+  // Temporary permissive mode: allow all origins, methods, and headers.
+  corsHandler = cors({
+    origin: true, // Reflects the request origin
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+    optionsSuccessStatus: 204,
+    preflightContinue: true, // Allow us to manually send 204 response
+  });
+} else {
+  corsHandler = cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin) {
+        return callback(null, true);
+      }
 
-const corsOptions = {
-  origin: allowAll
-    ? true
-    : function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.indexOf(origin) !== -1) {
-          return callback(null, true);
-        }
-        return callback(new Error('Not allowed by CORS'));
-      },
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false,
-  optionsSuccessStatus: 204,
+      if (config.CORS_ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Return a 403 ApiError so the error handler sends JSON
+      return callback(new ApiError(403, 'Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
+    credentials: false,
+    preflightContinue: true, // Allow us to manually send 204 response
+    optionsSuccessStatus: 204,
+  });
+}
+
+// DEBUG: Lightweight request logging for OPTIONS
+// Logs method, path, and Origin to help diagnose CORS preflight issues.
+const logCors = (req, res, next) => {
+  // eslint-disable-next-line no-console
+  console.log(`[CORS-DEBUG] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'null'}`);
+  next();
 };
 
-// ----------------------------------------------------------------------
-// 3) ULTRA-TOP-LEVEL HANDLERS (BEFORE everything else)
-// ----------------------------------------------------------------------
+// Explicitly answer preflight with 204.
+// Because preflightContinue is true, corsHandler sets headers and calls next().
+// We then immediately send status 204 to terminate the request.
+const handlePreflight = (req, res) => {
+  res.sendStatus(204);
+};
 
-// Health check
-app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+// Explicit handlers for critical endpoints
+app.options('/analyze', logCors, corsHandler, handlePreflight);
+app.options('/upload', logCors, corsHandler, handlePreflight);
 
-// Diagnostics endpoint
+// Catch-all for any other preflight requests
+app.options('*', logCors, corsHandler, handlePreflight);
+
+// Apply CORS to all other requests (GET, POST, etc.) BEFORE routes
+app.use(corsHandler);
+
+// DEBUG: Temporary diagnostics endpoint for CORS
+// Returns detected Origin and active configuration.
 app.get('/_debug/cors', (req, res) => {
-  const origin = req.headers.origin || null;
-  const allowAllEnv = config.CORS_ALLOW_ALL;
-  const allowList = config.CORS_ALLOWED_ORIGINS;
-  
-  res.setHeader('Access-Control-Allow-Origin', origin || '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  
-  return res.status(200).json({
-    detectedOrigin: origin,
-    allowAll: allowAllEnv,
-    allowList
+  res.json({
+    detectedOrigin: req.headers.origin || null,
+    corsAllowAll: config.CORS_ALLOW_ALL,
+    corsAllowedOrigins: config.CORS_ALLOWED_ORIGINS,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    timestamp: new Date().toISOString(),
   });
 });
 
-// Model debug endpoint (Self-test)
-app.get('/_debug/model', (req, res) => {
-  return res.status(200).json({
-    status: 'ok',
-    model: config.GEMINI_MODEL,
-    message: 'Active Gemini model configuration'
-  });
-});
-
-// Manual OPTIONS handlers to ensure preflight succeeds
-app.options('/analyze', (req, res) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
-  return res.sendStatus(204);
-});
-
-app.options('/upload', (req, res) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
-  return res.sendStatus(204);
-});
-
-app.options('*', (req, res) => {
-  const origin = req.headers.origin || '*';
-  res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
-  return res.sendStatus(204);
-});
-
-// ----------------------------------------------------------------------
-// 4) GLOBAL MIDDLEWARE
-// ----------------------------------------------------------------------
-
-// Apply cors middleware globally AFTER the explicit top-level handlers but BEFORE routes
-app.use(cors(corsOptions));
-app.use(express.json({ limit: '2mb' }));
-
-// ----------------------------------------------------------------------
-// 5) APP MIDDLEWARE & ROUTES
-// ----------------------------------------------------------------------
-
-// Basic request logging
+// Basic request logging (method, URL, status, response time)
 app.use(requestLogger);
 
-// Swagger UI at /docs
+/**
+ * Swagger UI at /docs
+ * We dynamically set the server URL based on the current request host/protocol.
+ */
 app.use('/docs', swaggerUi.serve, (req, res, next) => {
   const host = req.get('host'); // may or may not include port
   let protocol = req.protocol; // http or https
@@ -140,6 +137,9 @@ app.use('/docs', swaggerUi.serve, (req, res, next) => {
 
   swaggerUi.setup(dynamicSpec)(req, res, next);
 });
+
+// Parse JSON request body (limit prevents giant payloads)
+app.use(express.json({ limit: '2mb' }));
 
 // Mount routes
 app.use('/', routes);
