@@ -41,6 +41,7 @@ if (config.CORS_ALLOW_ALL) {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     optionsSuccessStatus: 204,
+    preflightContinue: true, // Allow us to manually send 204 response
   });
 } else {
   corsHandler = cors({
@@ -60,23 +61,34 @@ if (config.CORS_ALLOW_ALL) {
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type'],
     credentials: false,
-    preflightContinue: false,
+    preflightContinue: true, // Allow us to manually send 204 response
     optionsSuccessStatus: 204,
   });
 }
 
-// DEBUG: Lightweight request logging for OPTIONS /analyze and /upload
+// DEBUG: Lightweight request logging for OPTIONS
 // Logs method, path, and Origin to help diagnose CORS preflight issues.
-app.options(['/analyze', '/upload'], (req, res, next) => {
+const logCors = (req, res, next) => {
   // eslint-disable-next-line no-console
   console.log(`[CORS-DEBUG] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'null'}`);
   next();
-}, corsHandler);
+};
 
-// Explicitly answer preflight for every route FIRST (prevents fallthrough/missing headers).
-app.options('*', corsHandler);
+// Explicitly answer preflight with 204.
+// Because preflightContinue is true, corsHandler sets headers and calls next().
+// We then immediately send status 204 to terminate the request.
+const handlePreflight = (req, res) => {
+  res.sendStatus(204);
+};
 
-// Apply CORS BEFORE routes so it can handle preflight properly.
+// Explicit handlers for critical endpoints
+app.options('/analyze', logCors, corsHandler, handlePreflight);
+app.options('/upload', logCors, corsHandler, handlePreflight);
+
+// Catch-all for any other preflight requests
+app.options('*', logCors, corsHandler, handlePreflight);
+
+// Apply CORS to all other requests (GET, POST, etc.) BEFORE routes
 app.use(corsHandler);
 
 // DEBUG: Temporary diagnostics endpoint for CORS
