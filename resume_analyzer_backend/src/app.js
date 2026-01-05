@@ -32,26 +32,38 @@ app.set('trust proxy', true);
  * - Register app.options('*', ...) BEFORE any other middleware/routes so preflight never falls through
  *   to other handlers (which can result in missing CORS headers).
  */
-const corsHandler = cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps, curl, Postman)
-    if (!origin) {
-      return callback(null, true);
-    }
+let corsHandler;
 
-    if (config.CORS_ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true);
-    }
+if (config.CORS_ALLOW_ALL) {
+  // Temporary permissive mode: allow all origins, methods, and headers.
+  corsHandler = cors({
+    origin: true, // Reflects the request origin
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+    optionsSuccessStatus: 204,
+  });
+} else {
+  corsHandler = cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, Postman)
+      if (!origin) {
+        return callback(null, true);
+      }
 
-    // Return a 403 ApiError so the error handler sends JSON
-    return callback(new ApiError(403, 'Not allowed by CORS'));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type'],
-  credentials: false,
-  preflightContinue: false,
-  optionsSuccessStatus: 204,
-});
+      if (config.CORS_ALLOWED_ORIGINS.includes(origin)) {
+        return callback(null, true);
+      }
+
+      // Return a 403 ApiError so the error handler sends JSON
+      return callback(new ApiError(403, 'Not allowed by CORS'));
+    },
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type'],
+    credentials: false,
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
+  });
+}
 
 // Explicitly answer preflight for every route FIRST (prevents fallthrough/missing headers).
 app.options('*', corsHandler);

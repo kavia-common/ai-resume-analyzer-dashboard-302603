@@ -15,6 +15,7 @@ Create a `.env` file in this folder (do not commit secrets). Use `.env.example` 
 
 - `PORT` (default `3001`)
 - `CORS_ALLOWED_ORIGINS` (comma-separated list of allowed origins, default includes `http://localhost:3000` and the preview domain)
+- `CORS_ALLOW_ALL` (optional, set to `true` to temporarily allow all origins, methods, and headers)
 - `MAX_UPLOAD_MB` (default `10`)
 - `GEMINI_API_KEY` (**required for** `/analyze`)
 - `GEMINI_MODEL` (optional, default `gemini-2.0-flash`) — model name used for `/analyze` calls
@@ -26,6 +27,13 @@ Example:
 ```env
 CORS_ALLOWED_ORIGINS=http://localhost:3000,https://preview.example.com:3000,https://app.example.com
 ```
+
+**Temporary Permissive Mode:**
+To unblock preflight issues during development or debugging, you can enable permissive CORS by setting:
+```env
+CORS_ALLOW_ALL=true
+```
+This enables `origin: true` (reflects request origin), allows all methods/headers, and enables credentials.
 
 The backend will automatically respond with `Access-Control-Allow-Origin` set to the requesting origin if it matches the allow-list. OPTIONS preflight requests are handled automatically for all endpoints.
 

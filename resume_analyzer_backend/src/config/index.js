@@ -38,6 +38,9 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 // Gemini model name (kept configurable to allow quick roll-forward/roll-back)
 const GEMINI_MODEL = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 
+// Temporary flag to enable permissive CORS for troubleshooting (unblocks preflight)
+const CORS_ALLOW_ALL = process.env.CORS_ALLOW_ALL === 'true';
+
 module.exports = {
   PORT,
   CORS_ORIGIN, // deprecated, kept for backwards compatibility
@@ -45,4 +48,5 @@ module.exports = {
   MAX_UPLOAD_MB,
   GEMINI_API_KEY,
   GEMINI_MODEL,
+  CORS_ALLOW_ALL,
 };
