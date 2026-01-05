@@ -62,9 +62,10 @@ async function analyzeResumeWithGemini(params) {
 
   const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
 
-  // Model choice: "gemini-1.5-flash" is fast and widely available.
+  // Model choice is configurable via env. Default is gemini-2.5-flash.
+  // This prevents hardcoding a model that may not exist/enabled in a given project.
   const model = genAI.getGenerativeModel({
-    model: 'gemini-1.5-flash',
+    model: config.GEMINI_MODEL,
     generationConfig: {
       // Encourage deterministic structured output.
       temperature: 0.2,
