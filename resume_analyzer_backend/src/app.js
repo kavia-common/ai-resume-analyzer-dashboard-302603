@@ -18,81 +18,94 @@ const app = express();
 app.set('trust proxy', true);
 
 // ----------------------------------------------------------------------
-// CORS CONFIGURATION
+// 1) CORS SETUP & CONFIGURATION
 // ----------------------------------------------------------------------
 
-// DEBUG: Lightweight request logging for OPTIONS to help diagnose preflight issues
-const logCors = (req, res, next) => {
-  // eslint-disable-next-line no-console
-  console.log(`[CORS-DEBUG] ${req.method} ${req.path} - Origin: ${req.headers.origin || 'null'}`);
-  next();
-};
+const allowAll = config.CORS_ALLOW_ALL;
+const allowedOrigins = config.CORS_ALLOWED_ORIGINS;
 
-// Permissive CORS options as requested to unblock the frontend
 const corsOptions = {
-  origin: true, // Reflects the request origin
+  origin: allowAll
+    ? true
+    : function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+          return callback(null, true);
+        }
+        return callback(new Error('Not allowed by CORS'));
+      },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  credentials: false,
   optionsSuccessStatus: 204,
 };
 
-// 1. Apply CORS middleware globally BEFORE any routes
-// This ensures headers are set on all responses if possible
-app.use(cors(corsOptions));
-
-// 2. Explicit OPTIONS handlers for critical endpoints
-// These ensure that even if the global middleware somehow misses, we specifically handle these.
-// We manually set headers here to be absolutely sure, as requested.
-const manualCorsHeaders = (req, res) => {
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.status(204).end();
-};
-
-app.options('/analyze', logCors, manualCorsHeaders);
-app.options('/upload', logCors, manualCorsHeaders);
-
-// 3. Global catch-all for OPTIONS to ensure no 404s on preflight
-app.options('*', logCors, cors(corsOptions));
-
 // ----------------------------------------------------------------------
-// DIAGNOSTICS
+// 3) ULTRA-TOP-LEVEL HANDLERS (BEFORE everything else)
 // ----------------------------------------------------------------------
 
-// Explicit GET '/_debug/cors' route
-// Returns JSON with debugging info and sets Access-Control-Allow-Origin
+// Health check
+app.get('/health', (req, res) => res.status(200).json({ status: 'ok' }));
+
+// Diagnostics endpoint
 app.get('/_debug/cors', (req, res) => {
-  const origin = req.headers.origin || '*';
-  // Ensure this specific route always works for CORS
-  res.setHeader('Access-Control-Allow-Origin', origin);
+  const origin = req.headers.origin || null;
+  const allowAllEnv = !!process.env.CORS_ALLOW_ALL && process.env.CORS_ALLOW_ALL.toString().toLowerCase() === 'true';
+  const allowList = (process.env.CORS_ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
+  
+  res.setHeader('Access-Control-Allow-Origin', origin || '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-
-  res.json({
-    message: 'CORS Diagnostics',
-    corsMode: 'Permissive (Reflect Origin)',
-    receivedOriginHeader: req.headers.origin || null,
-    allowedOrigins: config.CORS_ALLOWED_ORIGINS, // Showing what's in config even if we are currently permissive
-    timestamp: new Date().toISOString(),
+  
+  return res.status(200).json({
+    detectedOrigin: origin,
+    allowAll: allowAllEnv,
+    allowList
   });
 });
 
+// Manual OPTIONS handlers to ensure preflight succeeds
+app.options('/analyze', (req, res) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+  return res.sendStatus(204);
+});
+
+app.options('/upload', (req, res) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+  return res.sendStatus(204);
+});
+
+app.options('*', (req, res) => {
+  const origin = req.headers.origin || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', req.headers['access-control-request-headers'] || 'Content-Type, Authorization');
+  return res.sendStatus(204);
+});
+
 // ----------------------------------------------------------------------
-// APP MIDDLEWARE & ROUTES
+// 4) GLOBAL MIDDLEWARE
 // ----------------------------------------------------------------------
 
-// Basic request logging (method, URL, status, response time)
+// Apply cors middleware globally AFTER the explicit top-level handlers but BEFORE routes
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '2mb' }));
+
+// ----------------------------------------------------------------------
+// 5) APP MIDDLEWARE & ROUTES
+// ----------------------------------------------------------------------
+
+// Basic request logging
 app.use(requestLogger);
 
-/**
- * Swagger UI at /docs
- * We dynamically set the server URL based on the current request host/protocol.
- */
+// Swagger UI at /docs
 app.use('/docs', swaggerUi.serve, (req, res, next) => {
   const host = req.get('host'); // may or may not include port
   let protocol = req.protocol; // http or https
@@ -118,9 +131,6 @@ app.use('/docs', swaggerUi.serve, (req, res, next) => {
 
   swaggerUi.setup(dynamicSpec)(req, res, next);
 });
-
-// Parse JSON request body (limit prevents giant payloads)
-app.use(express.json({ limit: '2mb' }));
 
 // Mount routes
 app.use('/', routes);
