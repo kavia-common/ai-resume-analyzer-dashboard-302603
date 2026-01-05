@@ -19,30 +19,42 @@ app.set('trust proxy', true);
 // Basic request logging (method, URL, status, response time)
 app.use(requestLogger);
 
-// CORS: Dynamic origin allow-list supporting multiple origins
-// If the requesting origin matches the allow-list, we return it in Access-Control-Allow-Origin
-app.use(cors({
+/**
+ * CORS: Dynamic origin allow-list supporting multiple origins.
+ *
+ * Requirements:
+ * - OPTIONS preflight for /analyze (and ALL routes) must return 204
+ * - Include allowed methods: GET,POST,OPTIONS
+ * - Include allowed headers: Content-Type
+ * - Use dynamic allow-list from CORS_ALLOWED_ORIGINS
+ *
+ * NOTE: If an Origin is not allow-listed, preflight will be rejected (no CORS headers).
+ */
+const corsHandler = cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) {
       return callback(null, true);
     }
 
-    // Check if the origin is in the allow-list
     if (config.CORS_ALLOWED_ORIGINS.includes(origin)) {
       return callback(null, true);
     }
 
-    // Reject origins not in the allow-list
     return callback(new Error('Not allowed by CORS'));
   },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
   credentials: false,
-  // Ensure preflight requests are handled correctly
   preflightContinue: false,
   optionsSuccessStatus: 204,
-}));
+});
+
+// Apply CORS BEFORE routes so it can handle preflight properly.
+app.use(corsHandler);
+
+// Explicitly answer preflight for every route (prevents Express 404 on OPTIONS in some setups).
+app.options('*', corsHandler);
 
 /**
  * Swagger UI at /docs

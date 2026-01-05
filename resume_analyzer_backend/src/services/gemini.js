@@ -8,6 +8,9 @@ const config = require('../config');
 // A conservative max for text sent to LLM to prevent huge requests.
 const MAX_TEXT_CHARS = 60_000;
 
+// Safe fallback model if the configured model is not available for the current API key/project.
+const FALLBACK_GEMINI_MODEL = 'gemini-2.5-flash';
+
 /**
  * Build a prompt that strongly encourages strict JSON output.
  * @param {string} text
@@ -32,6 +35,53 @@ function buildPrompt(text, jobRole) {
     'Resume Text:',
     text,
   ].join('\n');
+}
+
+/**
+ * Detect whether an upstream Gemini error is likely caused by an unsupported/unavailable model.
+ * We keep this intentionally heuristic because different environments/versions shape errors differently.
+ * @param {any} err
+ * @returns {boolean}
+ */
+function isUnsupportedModelError(err) {
+  const status = err && (err.status || err.statusCode || err.code);
+  const message = String((err && err.message) || '');
+  const bodyText = String((err && err.response && err.response.data) || '');
+
+  // Common signals:
+  // - 404 / NOT_FOUND (model doesn't exist or not enabled)
+  // - message mentions model not found / unsupported / not available
+  if (status === 404 || status === 'NOT_FOUND') return true;
+
+  const haystack = `${message}\n${bodyText}`.toLowerCase();
+  return (
+    haystack.includes('model') &&
+    (haystack.includes('not found') ||
+      haystack.includes('unsupported') ||
+      haystack.includes('not supported') ||
+      haystack.includes('not available') ||
+      haystack.includes('does not exist'))
+  );
+}
+
+/**
+ * Call Gemini using a specific model name.
+ * @param {GoogleGenerativeAI} genAI
+ * @param {string} modelName
+ * @param {string} prompt
+ * @returns {Promise<string>} raw text response
+ */
+async function generateWithModel(genAI, modelName, prompt) {
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    generationConfig: {
+      // Encourage deterministic structured output.
+      temperature: 0.2,
+    },
+  });
+
+  const result = await model.generateContent(prompt);
+  return result.response.text();
 }
 
 /**
@@ -61,31 +111,42 @@ async function analyzeResumeWithGemini(params) {
   }
 
   const genAI = new GoogleGenerativeAI(config.GEMINI_API_KEY);
-
-  // Model choice is configurable via env. Default is gemini-2.5-flash.
-  // This prevents hardcoding a model that may not exist/enabled in a given project.
-  const model = genAI.getGenerativeModel({
-    model: config.GEMINI_MODEL,
-    generationConfig: {
-      // Encourage deterministic structured output.
-      temperature: 0.2,
-    },
-  });
-
   const prompt = buildPrompt(text, jobRole);
+
+  const primaryModelName = config.GEMINI_MODEL;
+  const fallbackModelName = FALLBACK_GEMINI_MODEL;
 
   let rawText = '';
   try {
-    const result = await model.generateContent(prompt);
-    rawText = result.response.text();
+    rawText = await generateWithModel(genAI, primaryModelName, prompt);
   } catch (err) {
-    throw new ApiError(502, 'Gemini request failed.', { reason: err.message });
+    // If the configured model is unavailable, retry once with a safe default.
+    if (isUnsupportedModelError(err) && primaryModelName !== fallbackModelName) {
+      try {
+        rawText = await generateWithModel(genAI, fallbackModelName, prompt);
+      } catch (fallbackErr) {
+        throw new ApiError(502, 'Gemini request failed for both primary and fallback models.', {
+          primaryModel: primaryModelName,
+          fallbackModel: fallbackModelName,
+          primaryError: err && err.message ? err.message : String(err),
+          fallbackError: fallbackErr && fallbackErr.message ? fallbackErr.message : String(fallbackErr),
+          hint: 'Verify model availability for your API key/project. Consider listing available models via the Gemini "ListModels" API and update GEMINI_MODEL.',
+        });
+      }
+    }
+
+    // Not a model-availability issue (or fallback not applicable): fail fast.
+    throw new ApiError(502, 'Gemini request failed.', {
+      model: primaryModelName,
+      reason: err && err.message ? err.message : String(err),
+    });
   }
 
   const parsed = safeJsonParse(rawText);
   if (!parsed) {
     // We must guard against malformed responses (acceptance requirement).
     throw new ApiError(502, 'Gemini returned an invalid JSON response.', {
+      model: primaryModelName,
       example: 'Ensure model output is JSON only',
       receivedSnippet: rawText.slice(0, 500),
     });
