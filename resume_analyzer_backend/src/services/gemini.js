@@ -92,7 +92,7 @@ async function generateWithModel(genAI, modelName, prompt) {
  */
 async function analyzeResumeWithGemini(params) {
   /** This is a public function. */
-  const { text, jobRole } = params || {};
+  const { text, jobRole, requestId } = params || {};
 
   if (!config.GEMINI_API_KEY) {
     throw new ApiError(500, 'Server is missing GEMINI_API_KEY configuration.');
@@ -116,15 +116,61 @@ async function analyzeResumeWithGemini(params) {
   const primaryModelName = config.GEMINI_MODEL;
   const fallbackModelName = FALLBACK_GEMINI_MODEL;
 
+  // Log intent to call Gemini
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify({
+    level: 'info',
+    msg: 'Calling Gemini API',
+    requestId,
+    model: primaryModelName,
+    promptLength: prompt.length
+  }));
+
   let rawText = '';
   try {
     rawText = await generateWithModel(genAI, primaryModelName, prompt);
   } catch (err) {
+    const errorDetails = {
+      status: err.status || err.statusCode,
+      message: err.message,
+      responseBody: err.response && err.response.data
+    };
+
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({
+      level: 'error',
+      msg: 'Gemini primary model failed',
+      requestId,
+      model: primaryModelName,
+      error: errorDetails
+    }));
+
     // If the configured model is unavailable, retry once with a safe default.
     if (isUnsupportedModelError(err) && primaryModelName !== fallbackModelName) {
       try {
+        // eslint-disable-next-line no-console
+        console.log(JSON.stringify({
+          level: 'warn',
+          msg: 'Retrying with fallback model',
+          requestId,
+          fallbackModel: fallbackModelName
+        }));
+
         rawText = await generateWithModel(genAI, fallbackModelName, prompt);
       } catch (fallbackErr) {
+        // eslint-disable-next-line no-console
+        console.error(JSON.stringify({
+          level: 'error',
+          msg: 'Gemini fallback model failed',
+          requestId,
+          model: fallbackModelName,
+          error: {
+            status: fallbackErr.status || fallbackErr.statusCode,
+            message: fallbackErr.message,
+            responseBody: fallbackErr.response && fallbackErr.response.data
+          }
+        }));
+
         throw new ApiError(502, 'Gemini request failed for both primary and fallback models.', {
           primaryModel: primaryModelName,
           fallbackModel: fallbackModelName,
@@ -133,18 +179,26 @@ async function analyzeResumeWithGemini(params) {
           hint: 'Verify model availability for your API key/project. Consider listing available models via the Gemini "ListModels" API and update GEMINI_MODEL.',
         });
       }
+    } else {
+      // Not a model-availability issue (or fallback not applicable): fail fast.
+      throw new ApiError(502, 'Gemini request failed.', {
+        model: primaryModelName,
+        reason: err && err.message ? err.message : String(err),
+      });
     }
-
-    // Not a model-availability issue (or fallback not applicable): fail fast.
-    throw new ApiError(502, 'Gemini request failed.', {
-      model: primaryModelName,
-      reason: err && err.message ? err.message : String(err),
-    });
   }
 
   const parsed = safeJsonParse(rawText);
   if (!parsed) {
     // We must guard against malformed responses (acceptance requirement).
+    // eslint-disable-next-line no-console
+    console.error(JSON.stringify({
+      level: 'error',
+      msg: 'Gemini returned invalid JSON',
+      requestId,
+      snippet: rawText.slice(0, 200)
+    }));
+
     throw new ApiError(502, 'Gemini returned an invalid JSON response.', {
       model: primaryModelName,
       example: 'Ensure model output is JSON only',

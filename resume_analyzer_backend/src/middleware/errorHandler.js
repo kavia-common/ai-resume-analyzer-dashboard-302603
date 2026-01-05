@@ -15,7 +15,17 @@ function errorHandler(err, req, res, next) {
 
   // Avoid leaking stack traces to clients. We keep it logged server-side.
   // eslint-disable-next-line no-console
-  console.error('Error:', err);
+  console.error(JSON.stringify({
+    level: 'error',
+    msg: 'Global error handler caught exception',
+    requestId: req.requestId, // May be undefined if error happened before controller
+    path: req.originalUrl,
+    method: req.method,
+    statusCode,
+    message: err.message,
+    stack: err.stack, // logged server-side only
+    details: isApiError ? err.details : undefined
+  }));
 
   const payload = {
     status: 'error',
