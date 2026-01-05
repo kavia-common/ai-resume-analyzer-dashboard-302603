@@ -16,9 +16,6 @@ const app = express();
 // Trust proxy (useful when deployed behind a reverse proxy)
 app.set('trust proxy', true);
 
-// Basic request logging (method, URL, status, response time)
-app.use(requestLogger);
-
 /**
  * CORS: Dynamic origin allow-list supporting multiple origins.
  *
@@ -29,6 +26,10 @@ app.use(requestLogger);
  * - Use dynamic allow-list from CORS_ALLOWED_ORIGINS
  *
  * NOTE: If an Origin is not allow-listed, preflight will be rejected (no CORS headers).
+ *
+ * IMPORTANT ORDERING:
+ * - Register app.options('*', ...) BEFORE any other middleware/routes so preflight never falls through
+ *   to other handlers (which can result in missing CORS headers).
  */
 const corsHandler = cors({
   origin: (origin, callback) => {
@@ -50,11 +51,14 @@ const corsHandler = cors({
   optionsSuccessStatus: 204,
 });
 
+// Explicitly answer preflight for every route FIRST (prevents fallthrough/missing headers).
+app.options('*', corsHandler);
+
 // Apply CORS BEFORE routes so it can handle preflight properly.
 app.use(corsHandler);
 
-// Explicitly answer preflight for every route (prevents Express 404 on OPTIONS in some setups).
-app.options('*', corsHandler);
+// Basic request logging (method, URL, status, response time)
+app.use(requestLogger);
 
 /**
  * Swagger UI at /docs

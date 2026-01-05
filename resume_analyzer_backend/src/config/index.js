@@ -19,7 +19,13 @@ const PORT = Number(process.env.PORT || DEFAULT_PORT);
 // Defaults to localhost:3000 and auto-detects preview domain if available
 const CORS_ALLOWED_ORIGINS = process.env.CORS_ALLOWED_ORIGINS
   ? process.env.CORS_ALLOWED_ORIGINS.split(',').map((origin) => origin.trim())
-  : [DEFAULT_CORS_ORIGIN, 'https://vscode-internal-36100-beta.beta01.cloud.kavia.ai:3000'];
+  : [
+      DEFAULT_CORS_ORIGIN,
+      // Backend preview domain (existing)
+      'https://vscode-internal-36100-beta.beta01.cloud.kavia.ai:3000',
+      // Frontend origin that must be allowed for CORS (requested)
+      'https://vscode-internal-21009-beta.beta01.cloud.kavia.ai:3000',
+    ];
 
 // Legacy support for single CORS_ORIGIN (deprecated but still works)
 const CORS_ORIGIN = process.env.CORS_ORIGIN || DEFAULT_CORS_ORIGIN;
